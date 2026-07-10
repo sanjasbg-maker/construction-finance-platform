@@ -1,8 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition, type ChangeEvent } from "react";
 import Link from "next/link";
 import type { ClientFormState } from "./actions";
+import { extractClientFromPdf } from "./extract-actions";
 
 const initialState: ClientFormState = {};
 
@@ -32,19 +33,73 @@ function toFieldValues(v?: DefaultValues): FieldValues {
 export function ClientForm({
   action,
   defaultValues,
+  showImport = false,
 }: {
   action: (prevState: ClientFormState, formData: FormData) => Promise<ClientFormState>;
   defaultValues?: DefaultValues;
+  showImport?: boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
   const [values, setValues] = useState<FieldValues>(() => toFieldValues(defaultValues));
+  const [isExtracting, startExtracting] = useTransition();
+  const [importError, setImportError] = useState<string | null>(null);
 
   function updateField(name: keyof FieldValues, value: string) {
     setValues((prev) => ({ ...prev, [name]: value }));
   }
 
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file again later
+    if (!file) return;
+
+    setImportError(null);
+    const docData = new FormData();
+    docData.set("document", file);
+
+    startExtracting(async () => {
+      const result = await extractClientFromPdf(docData);
+      if (!result.success) {
+        setImportError(result.error);
+        return;
+      }
+      setValues((prev) => ({
+        name: result.data.name ?? prev.name,
+        taxId: result.data.taxId ?? prev.taxId,
+        email: result.data.email ?? prev.email,
+        phone: result.data.phone ?? prev.phone,
+      }));
+    });
+  }
+
   return (
     <form action={formAction} className="flex max-w-lg flex-col gap-4">
+      {showImport && (
+        <div className="rounded-md border border-dashed border-zinc-300 p-4 dark:border-zinc-700">
+          <label className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Import from PDF (contract, registration document, etc.) — optional
+          </label>
+          <input
+            type="file"
+            accept="application/pdf"
+            disabled={isExtracting}
+            onChange={handleFileChange}
+            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-900 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white disabled:opacity-50 dark:text-zinc-400 dark:file:bg-zinc-100 dark:file:text-zinc-900"
+          />
+          {isExtracting && (
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Reading document…
+            </p>
+          )}
+          {importError && (
+            <p className="mt-2 text-xs text-red-600 dark:text-red-400">{importError}</p>
+          )}
+          <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+            Fields below will be filled in for you to review — nothing is saved until you click Save.
+          </p>
+        </div>
+      )}
+
       {state.message && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {state.message}

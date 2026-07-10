@@ -7,7 +7,7 @@ export default function NewClientPage() {
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Add Client
       </h1>
-      <ClientForm action={createClient} />
+      <ClientForm action={createClient} showImport />
     </div>
   );
 }
