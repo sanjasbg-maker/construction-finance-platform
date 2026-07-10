@@ -28,6 +28,19 @@ function serializeValue(value: unknown) {
   return value;
 }
 
+/** Strips housekeeping fields from a single record, for CREATE/DELETE audit entries
+ * where there's no "before" or "after" to diff against. Assumes the record wasn't
+ * fetched with a narrowing `select` (not used anywhere in this codebase yet — if a
+ * future module needs one, this will need `id` to always be included). */
+function projectFields(record: Record<string, unknown>) {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(record)) {
+    if (HOUSEKEEPING_FIELDS.has(key)) continue;
+    result[key] = serializeValue(record[key]);
+  }
+  return result;
+}
+
 function diffRecords(before: Record<string, unknown>, after: Record<string, unknown>) {
   const oldValue: Record<string, unknown> = {};
   const newValue: Record<string, unknown> = {};
@@ -45,21 +58,43 @@ function diffRecords(before: Record<string, unknown>, after: Record<string, unkn
 
 const basePrismaClient = new PrismaClient({ adapter });
 
+function modelDelegate(model: string) {
+  return (basePrismaClient as unknown as Record<string, Record<string, (a: unknown) => Promise<unknown>>>)[
+    uncapitalize(model)
+  ];
+}
+
+async function writeAuditLog(
+  action: string,
+  model: string,
+  entityId: string,
+  userId: string,
+  oldValue: Record<string, unknown> | null,
+  newValue: Record<string, unknown> | null,
+) {
+  await basePrismaClient.auditLog.create({
+    data: {
+      action,
+      entity: model,
+      entityId,
+      userId,
+      oldValue: oldValue as Prisma.InputJsonValue,
+      newValue: newValue as Prisma.InputJsonValue,
+    },
+  });
+}
+
 /**
  * Builds a Prisma client wired for the base-fields convention: soft delete
  * (delete/deleteMany become an update setting deletedAt, reads auto-filter
  * deletedAt: null) plus, when a userId is supplied, createdBy/updatedBy stamping and
- * an automatic field-level AuditLog entry on every update. One implementation shared
- * by every model instead of relying on each future Server Action to remember all of
- * this (see plan decisions #2 and #3).
+ * an automatic AuditLog entry on every create, update, and delete — "every change
+ * must be recorded" per BUSINESS_RULES.md, not just field-level updates. One
+ * implementation shared by every model instead of relying on each future Server
+ * Action to remember all of this (see plan decisions #2 and #3).
  */
 function buildClient(userId?: string): PrismaClient {
-  // Typed `any` deliberately: the extended client is self-referenced inside the
-  // `delete`/`deleteMany` handlers below (to route soft deletes through this same
-  // client's `update`, so stamping/audit apply consistently), which would otherwise
-  // be a circular type inference. Cast back to `PrismaClient` at the return.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client: any = basePrismaClient.$extends({
+  const client = basePrismaClient.$extends({
     query: {
       $allModels: {
         async findMany({ model, args, query }) {
@@ -84,15 +119,23 @@ function buildClient(userId?: string): PrismaClient {
           if (userId && !APPEND_ONLY_MODELS.has(model)) {
             args.data = { ...args.data, createdBy: userId, updatedBy: userId };
           }
-          return query(args);
+
+          const created = (await query(args)) as Record<string, unknown>;
+
+          if (userId && !APPEND_ONLY_MODELS.has(model)) {
+            await writeAuditLog("CREATE", model, String(created.id), userId, null, projectFields(created));
+          }
+
+          return created;
         },
         async update({ model, args, query }) {
           if (APPEND_ONLY_MODELS.has(model)) return query(args);
 
           const before = userId
-            ? await (basePrismaClient as unknown as Record<string, { findUnique: (a: unknown) => Promise<Record<string, unknown> | null> }>)[
-                uncapitalize(model)
-              ].findUnique({ where: args.where })
+            ? ((await modelDelegate(model).findUnique({ where: args.where })) as Record<
+                string,
+                unknown
+              > | null)
             : null;
 
           if (userId) {
@@ -104,16 +147,7 @@ function buildClient(userId?: string): PrismaClient {
           if (userId && before) {
             const { oldValue, newValue } = diffRecords(before, after);
             if (Object.keys(newValue).length > 0) {
-              await basePrismaClient.auditLog.create({
-                data: {
-                  action: "UPDATE",
-                  entity: model,
-                  entityId: String(after.id),
-                  userId,
-                  oldValue: oldValue as Prisma.InputJsonValue,
-                  newValue: newValue as Prisma.InputJsonValue,
-                },
-              });
+              await writeAuditLog("UPDATE", model, String(after.id), userId, oldValue, newValue);
             }
           }
 
@@ -121,23 +155,47 @@ function buildClient(userId?: string): PrismaClient {
         },
         async delete({ model, args, query }) {
           if (APPEND_ONLY_MODELS.has(model)) return query(args);
+
+          const before = userId
+            ? ((await modelDelegate(model).findUnique({ where: args.where })) as Record<
+                string,
+                unknown
+              > | null)
+            : null;
+
           const data: Record<string, unknown> = { deletedAt: new Date() };
           if (userId) data.updatedBy = userId;
-          // Route through this same extended client's `update` (not the raw query)
-          // so stamping and audit logging apply consistently to soft deletes too.
-          return client[uncapitalize(model)].update({ where: args.where, data });
+          const after = (await modelDelegate(model).update({ where: args.where, data })) as Record<
+            string,
+            unknown
+          >;
+
+          if (userId && before) {
+            await writeAuditLog("DELETE", model, String(after.id), userId, projectFields(before), null);
+          }
+
+          return after;
         },
         async deleteMany({ model, args, query }) {
           if (APPEND_ONLY_MODELS.has(model)) return query(args);
+
           const data: Record<string, unknown> = { deletedAt: new Date() };
           if (userId) data.updatedBy = userId;
-          return client[uncapitalize(model)].updateMany({ where: args.where, data });
+          const result = (await modelDelegate(model).updateMany({ where: args.where, data })) as {
+            count: number;
+          };
+
+          if (userId && result.count > 0) {
+            await writeAuditLog("DELETE_MANY", model, "*", userId, null, { count: result.count });
+          }
+
+          return result;
         },
       },
     },
   });
 
-  return client as PrismaClient;
+  return client as unknown as PrismaClient;
 }
 
 const globalForPrisma = globalThis as unknown as {
@@ -153,8 +211,8 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 /** Client scoped to the acting user: adds createdBy/updatedBy stamping and automatic
- * audit-log diffing on top of the same soft-delete behavior. Use this in Server
- * Actions for any write, instead of the plain `prisma` export. */
+ * audit-log entries (create/update/delete) on top of the same soft-delete behavior.
+ * Use this in Server Actions for any write, instead of the plain `prisma` export. */
 export function withUser(userId: string) {
   return buildClient(userId);
 }
