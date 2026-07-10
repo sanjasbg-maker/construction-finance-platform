@@ -3,19 +3,27 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { modules } from "@/lib/modules";
+import { UserSwitcher } from "@/components/UserSwitcher";
 
-export function Sidebar() {
+type UserOption = { id: string; name: string; role: string };
+
+export function Sidebar({
+  users,
+  activeUserId,
+}: {
+  users: UserOption[];
+  activeUserId?: string;
+}) {
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="px-4 py-5">
         <p className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          NextFinancial Control
+          Construction Finance Platform
         </p>
-        <p className="text-xs text-zinc-500 dark:text-zinc-400">2.0</p>
       </div>
-      <nav className="flex flex-col gap-0.5 px-2">
+      <nav className="flex flex-1 flex-col gap-0.5 px-2">
         {modules.map((m) => {
           const href = `/${m.slug}`;
           const active = pathname === href || pathname.startsWith(`${href}/`);
@@ -35,6 +43,9 @@ export function Sidebar() {
           );
         })}
       </nav>
+      <div className="border-t border-zinc-200 dark:border-zinc-800">
+        <UserSwitcher users={users} activeUserId={activeUserId} />
+      </div>
     </aside>
   );
 }

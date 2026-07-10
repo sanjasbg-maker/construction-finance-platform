@@ -1,6 +1,11 @@
-// NextFinancial Control 2.0 - data model
-// Construction finance app: Payables, Receivables, Bank Statements, Projects,
-// Vendors, Clients, Settings, Reports, Data all read/write these models.
+// Construction Finance Platform - data model
+// See CLAUDE.md and BUSINESS_RULES.md for the source spec, and
+// .claude/plans/playful-spinning-diffie.md (in the user's home dir) for the
+// architectural decisions behind this schema.
+//
+// Base-fields convention: every model has id/createdAt/updatedAt/createdBy/updatedBy/
+// deletedAt EXCEPT AuditLog and ExchangeRate, which are append-only by design.
+// createdBy/updatedBy are loose user-id strings, not relations (see plan decision #1).
 
 generator client {
   provider = "prisma-client"
@@ -11,146 +16,47 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------- Settings ----------
-
-model Company {
-  id        String   @id @default(cuid())
-  name      String
-  taxId     String?
-  currency  String   @default("EUR")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  users      User[]
-  vendors    Vendor[]
-  clients    Client[]
-  projects   Project[]
-  costCodes  CostCode[]
-  bankAccounts BankAccount[]
-}
+// ---------- Enums ----------
 
 enum UserRole {
-  OWNER
-  ACCOUNTANT
+  ADMIN
+  DIRECTOR
+  FINANCE
+  PROJECT_MANAGER
   VIEWER
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  role      UserRole @default(VIEWER)
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  createdAt DateTime @default(now())
-
-  auditLogs AuditLog[]
+enum Currency {
+  EUR
+  RSD
 }
-
-model CostCode {
-  id        String   @id @default(cuid())
-  code      String
-  name      String
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  bills    Bill[]
-  invoices Invoice[]
-
-  @@unique([companyId, code])
-}
-
-// ---------- Vendors / Clients ----------
-
-model Vendor {
-  id            String   @id @default(cuid())
-  name          String
-  taxId         String?
-  email         String?
-  phone         String?
-  paymentTerms  String?
-  companyId     String
-  company       Company  @relation(fields: [companyId], references: [id])
-  createdAt     DateTime @default(now())
-
-  bills Bill[]
-}
-
-model Client {
-  id        String   @id @default(cuid())
-  name      String
-  taxId     String?
-  email     String?
-  phone     String?
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  createdAt DateTime @default(now())
-
-  invoices Invoice[]
-  projects Project[]
-}
-
-// ---------- Projects ----------
 
 enum ProjectStatus {
-  PLANNED
   ACTIVE
   ON_HOLD
   COMPLETED
+  CANCELLED
 }
 
-model Project {
-  id        String        @id @default(cuid())
-  name      String
-  code      String
-  status    ProjectStatus @default(PLANNED)
-  budget    Decimal       @default(0) @db.Decimal(14, 2)
-  startDate DateTime?
-  endDate   DateTime?
-  companyId String
-  company   Company       @relation(fields: [companyId], references: [id])
-  clientId  String?
-  client    Client?       @relation(fields: [clientId], references: [id])
-  createdAt DateTime      @default(now())
-
-  bills    Bill[]
-  invoices Invoice[]
-
-  @@unique([companyId, code])
-}
-
-// ---------- Payables (AP) ----------
-
-enum BillStatus {
+enum ContractStatus {
   DRAFT
+  ACTIVE
+  COMPLETED
+  TERMINATED
+}
+
+enum PurchaseInvoiceStatus {
+  RECEIVED
+  WAITING_PM_APPROVAL
   APPROVED
+  WAITING_DIRECTOR_APPROVAL
+  READY_FOR_PAYMENT
   PARTIALLY_PAID
   PAID
-  OVERDUE
+  CANCELLED
 }
 
-model Bill {
-  id          String     @id @default(cuid())
-  number      String
-  amount      Decimal    @db.Decimal(14, 2)
-  issueDate   DateTime
-  dueDate     DateTime
-  status      BillStatus @default(DRAFT)
-  vendorId    String
-  vendor      Vendor     @relation(fields: [vendorId], references: [id])
-  projectId   String?
-  project     Project?   @relation(fields: [projectId], references: [id])
-  costCodeId  String?
-  costCode    CostCode?  @relation(fields: [costCodeId], references: [id])
-  createdAt   DateTime   @default(now())
-
-  payments    Payment[]
-  attachments Attachment[]
-}
-
-// ---------- Receivables (AR) ----------
-
-enum InvoiceStatus {
+enum SalesInvoiceStatus {
   DRAFT
   SENT
   PARTIALLY_PAID
@@ -158,106 +64,541 @@ enum InvoiceStatus {
   OVERDUE
 }
 
-model Invoice {
-  id          String        @id @default(cuid())
-  number      String
-  amount      Decimal       @db.Decimal(14, 2)
-  issueDate   DateTime
-  dueDate     DateTime
-  status      InvoiceStatus @default(DRAFT)
-  clientId    String
-  client      Client        @relation(fields: [clientId], references: [id])
-  projectId   String?
-  project     Project?      @relation(fields: [projectId], references: [id])
-  costCodeId  String?
-  costCode    CostCode?     @relation(fields: [costCodeId], references: [id])
-  createdAt   DateTime      @default(now())
-
-  payments    Payment[]
-  attachments Attachment[]
+enum SituationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
-// ---------- Payments (links AP/AR to money movement) ----------
+enum ApprovalStepRole {
+  PROJECT_MANAGER
+  FINANCE
+  DIRECTOR
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
 
 enum PaymentDirection {
-  INCOMING
-  OUTGOING
+  IN
+  OUT
 }
 
-model Payment {
-  id          String           @id @default(cuid())
-  amount      Decimal          @db.Decimal(14, 2)
-  date        DateTime
-  direction   PaymentDirection
-  billId      String?
-  bill        Bill?            @relation(fields: [billId], references: [id])
-  invoiceId   String?
-  invoice     Invoice?         @relation(fields: [invoiceId], references: [id])
-  bankTxId    String?          @unique
-  bankTx      BankTransaction? @relation(fields: [bankTxId], references: [id])
-  createdAt   DateTime         @default(now())
+enum PaymentType {
+  VENDOR_ADVANCE
+  CLIENT_ADVANCE
+  INVOICE_SETTLEMENT
+  RETENTION_RELEASE
 }
 
-// ---------- Bank Statements ----------
+enum RetentionDirection {
+  CLIENT_FROM_COMPANY
+  COMPANY_FROM_VENDOR
+}
+
+enum RetentionStatus {
+  HELD
+  PARTIALLY_RELEASED
+  RELEASED
+}
+
+enum GuaranteeType {
+  PERFORMANCE
+  ADVANCE_PAYMENT
+  WARRANTY
+}
+
+enum GuaranteeStatus {
+  ACTIVE
+  RELEASED
+  EXPIRED
+  CALLED
+}
+
+enum DocumentCategory {
+  CONTRACT
+  AMENDMENT
+  INVOICE
+  BANK_STATEMENT
+  GUARANTEE
+  PHOTO
+  CORRESPONDENCE
+  OTHER
+}
+
+// ---------- Administration ----------
+
+model User {
+  id    String   @id @default(cuid())
+  name  String
+  email String   @unique
+  role  UserRole @default(VIEWER)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  pmAssignments     ProjectManagerAssignment[]
+  approvalSteps     ApprovalStep[]
+  situationsActedOn Situation[]
+}
+
+// ---------- Clients / Vendors ----------
+
+model Client {
+  id    String  @id @default(cuid())
+  name  String
+  taxId String?
+  email String?
+  phone String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  projects      Project[]
+  salesInvoices SalesInvoice[]
+  payments      Payment[]
+}
+
+model Vendor {
+  id           String  @id @default(cuid())
+  name         String
+  taxId        String?
+  email        String?
+  phone        String?
+  paymentTerms String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  purchaseInvoices PurchaseInvoice[]
+  payments         Payment[]
+}
+
+// ---------- Projects ----------
+
+model Project {
+  id        String        @id @default(cuid())
+  name      String
+  code      String        @unique
+  clientId  String
+  client    Client        @relation(fields: [clientId], references: [id])
+  status    ProjectStatus @default(ACTIVE)
+  startDate DateTime?
+  endDate   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  contracts        Contract[]
+  purchaseInvoices PurchaseInvoice[]
+  salesInvoices    SalesInvoice[]
+  situations       Situation[]
+  documents        Document[]
+  guarantees       Guarantee[]
+  pmAssignments    ProjectManagerAssignment[]
+}
+
+model ProjectManagerAssignment {
+  id        String    @id @default(cuid())
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id])
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  startDate DateTime
+  endDate   DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+}
+
+// ---------- Contracts ----------
+
+model Contract {
+  id               String         @id @default(cuid())
+  number           String
+  date             DateTime
+  projectId        String
+  project          Project        @relation(fields: [projectId], references: [id])
+  value            Decimal        @db.Decimal(14, 2)
+  currency         Currency
+  retentionPercent Decimal?       @db.Decimal(5, 2)
+  status           ContractStatus @default(DRAFT)
+  startDate        DateTime?
+  endDate          DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  amendments       ContractAmendment[]
+  purchaseInvoices PurchaseInvoice[]
+  salesInvoices    SalesInvoice[]
+  retentions       Retention[]
+  guarantees       Guarantee[]
+  documents        Document[]
+  situations       Situation[]
+}
+
+model ContractAmendment {
+  id            String   @id @default(cuid())
+  contractId    String
+  contract      Contract @relation(fields: [contractId], references: [id])
+  number        String
+  date          DateTime
+  valueChange   Decimal  @db.Decimal(14, 2)
+  newTotalValue Decimal  @db.Decimal(14, 2)
+  reason        String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  documents Document[]
+}
+
+// ---------- Situations (progress / measurement certificates) ----------
+
+model Situation {
+  id         String          @id @default(cuid())
+  number     String
+  date       DateTime
+  projectId  String
+  project    Project         @relation(fields: [projectId], references: [id])
+  contractId String?
+  contract   Contract?       @relation(fields: [contractId], references: [id])
+  amount     Decimal         @db.Decimal(14, 2)
+  currency   Currency
+  status     SituationStatus @default(DRAFT)
+  approvedAt DateTime?
+  approvedBy String?
+  approver   User?           @relation(fields: [approvedBy], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  salesInvoices SalesInvoice[]
+}
+
+// ---------- Purchase Invoices (Vendor Invoices, received via SEF) ----------
+
+model PurchaseInvoice {
+  id         String                @id @default(cuid())
+  number     String
+  sefNumber  String?
+  vendorId   String
+  vendor     Vendor                @relation(fields: [vendorId], references: [id])
+  projectId  String
+  project    Project               @relation(fields: [projectId], references: [id])
+  contractId String?
+  contract   Contract?             @relation(fields: [contractId], references: [id])
+  amount     Decimal               @db.Decimal(14, 2)
+  currency   Currency
+  issueDate  DateTime
+  dueDate    DateTime
+  status     PurchaseInvoiceStatus @default(RECEIVED)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  approvalSteps ApprovalStep[]
+  allocations   PaymentAllocation[]
+  retentions    Retention[]
+  documents     Document[]
+}
+
+// ---------- Sales Invoices (Client Invoices) ----------
+
+model SalesInvoice {
+  id          String             @id @default(cuid())
+  number      String
+  clientId    String
+  client      Client             @relation(fields: [clientId], references: [id])
+  projectId   String
+  project     Project            @relation(fields: [projectId], references: [id])
+  contractId  String?
+  contract    Contract?          @relation(fields: [contractId], references: [id])
+  situationId String?
+  situation   Situation?         @relation(fields: [situationId], references: [id])
+  amount      Decimal            @db.Decimal(14, 2)
+  currency    Currency
+  issueDate   DateTime
+  dueDate     DateTime
+  status      SalesInvoiceStatus @default(DRAFT)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  allocations PaymentAllocation[]
+  retentions  Retention[]
+  documents   Document[]
+}
+
+// ---------- Approval workflow ----------
+
+model ApprovalStep {
+  id                String            @id @default(cuid())
+  purchaseInvoiceId String
+  purchaseInvoice   PurchaseInvoice   @relation(fields: [purchaseInvoiceId], references: [id])
+  role              ApprovalStepRole
+  decision          ApprovalDecision?
+  actedBy           String?
+  actor             User?             @relation(fields: [actedBy], references: [id])
+  comment           String?
+  actedAt           DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+}
+
+// ---------- Retention ----------
+
+model Retention {
+  id                String             @id @default(cuid())
+  contractId        String
+  contract          Contract           @relation(fields: [contractId], references: [id])
+  direction         RetentionDirection
+  purchaseInvoiceId String?
+  purchaseInvoice   PurchaseInvoice?   @relation(fields: [purchaseInvoiceId], references: [id])
+  salesInvoiceId    String?
+  salesInvoice      SalesInvoice?      @relation(fields: [salesInvoiceId], references: [id])
+  amount            Decimal            @db.Decimal(14, 2)
+  currency          Currency
+  percent           Decimal?           @db.Decimal(5, 2)
+  status            RetentionStatus    @default(HELD)
+  releaseDate       DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  releasePayment Payment?
+}
+
+// ---------- Guarantees ----------
+
+model Guarantee {
+  id             String          @id @default(cuid())
+  type           GuaranteeType
+  contractId     String?
+  contract       Contract?       @relation(fields: [contractId], references: [id])
+  projectId      String?
+  project        Project?        @relation(fields: [projectId], references: [id])
+  issueDate      DateTime
+  expiryDate     DateTime
+  amount         Decimal         @db.Decimal(14, 2)
+  currency       Currency
+  status         GuaranteeStatus @default(ACTIVE)
+  bankName       String
+  reminderSentAt DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  documents Document[]
+}
+
+// ---------- Bank Accounts / Statements ----------
 
 model BankAccount {
-  id         String   @id @default(cuid())
-  name       String
-  iban       String?
-  currency   String   @default("EUR")
-  companyId  String
-  company    Company  @relation(fields: [companyId], references: [id])
+  id       String   @id @default(cuid())
+  name     String
+  iban     String?
+  currency Currency
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
 
   statements BankStatement[]
+  payments   Payment[]
 }
 
 model BankStatement {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   bankAccountId String
   bankAccount   BankAccount @relation(fields: [bankAccountId], references: [id])
   fileName      String
-  importedAt    DateTime @default(now())
+  importedAt    DateTime    @default(now())
   periodStart   DateTime?
   periodEnd     DateTime?
 
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
   transactions BankTransaction[]
-  attachment   Attachment?
+  documents    Document[]
 }
 
 model BankTransaction {
-  id              String   @id @default(cuid())
+  id              String        @id @default(cuid())
   bankStatementId String
   bankStatement   BankStatement @relation(fields: [bankStatementId], references: [id])
   date            DateTime
   description     String
-  amount          Decimal  @db.Decimal(14, 2)
-  reconciled      Boolean  @default(false)
+  amount          Decimal       @db.Decimal(14, 2)
+  reconciled      Boolean       @default(false)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
 
   payment Payment?
 }
 
-// ---------- Data (attachments / imports) ----------
+// ---------- Treasury (Payments) ----------
 
-model Attachment {
-  id              String         @id @default(cuid())
-  fileName        String
-  url             String
-  mimeType        String
-  uploadedAt      DateTime       @default(now())
-  billId          String?
-  bill            Bill?          @relation(fields: [billId], references: [id])
-  invoiceId       String?
-  invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
-  bankStatementId String?        @unique
-  bankStatement   BankStatement? @relation(fields: [bankStatementId], references: [id])
+model Payment {
+  id                String           @id @default(cuid())
+  direction         PaymentDirection
+  type              PaymentType
+  amount            Decimal          @db.Decimal(14, 2)
+  currency          Currency
+  date              DateTime
+  bankAccountId     String
+  bankAccount       BankAccount      @relation(fields: [bankAccountId], references: [id])
+  vendorId          String?
+  vendor            Vendor?          @relation(fields: [vendorId], references: [id])
+  clientId          String?
+  client            Client?          @relation(fields: [clientId], references: [id])
+  retentionId       String?          @unique
+  retention         Retention?       @relation(fields: [retentionId], references: [id])
+  // Only set when type is VENDOR_ADVANCE or CLIENT_ADVANCE. Consumed/remaining
+  // amounts are computed from `allocations`, not stored (see plan decision #5).
+  originalAmount    Decimal?         @db.Decimal(14, 2)
+  bankTransactionId String?          @unique
+  bankTransaction   BankTransaction? @relation(fields: [bankTransactionId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+
+  allocations PaymentAllocation[]
 }
 
+model PaymentAllocation {
+  id                String           @id @default(cuid())
+  paymentId         String
+  payment           Payment          @relation(fields: [paymentId], references: [id])
+  purchaseInvoiceId String?
+  purchaseInvoice   PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id])
+  salesInvoiceId    String?
+  salesInvoice      SalesInvoice?    @relation(fields: [salesInvoiceId], references: [id])
+  amount            Decimal          @db.Decimal(14, 2)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+}
+
+// ---------- Multi-currency ----------
+
+// Append-only: historical exchange rates must never change, so no update/soft-delete
+// fields exist on this model at all (see plan decision #4).
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  date         DateTime
+  fromCurrency Currency
+  toCurrency   Currency
+  rate         Decimal  @db.Decimal(18, 6)
+  createdAt    DateTime @default(now())
+  createdBy    String?
+
+  @@unique([date, fromCurrency, toCurrency])
+}
+
+// ---------- Documents ----------
+
+model Document {
+  id                  String             @id @default(cuid())
+  category            DocumentCategory
+  fileName            String
+  url                 String
+  mimeType            String
+  projectId           String?
+  project             Project?           @relation(fields: [projectId], references: [id])
+  contractId          String?
+  contract            Contract?          @relation(fields: [contractId], references: [id])
+  contractAmendmentId String?
+  contractAmendment   ContractAmendment? @relation(fields: [contractAmendmentId], references: [id])
+  purchaseInvoiceId   String?
+  purchaseInvoice     PurchaseInvoice?   @relation(fields: [purchaseInvoiceId], references: [id])
+  salesInvoiceId      String?
+  salesInvoice        SalesInvoice?      @relation(fields: [salesInvoiceId], references: [id])
+  bankStatementId     String?
+  bankStatement       BankStatement?     @relation(fields: [bankStatementId], references: [id])
+  guaranteeId         String?
+  guarantee           Guarantee?         @relation(fields: [guaranteeId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  createdBy String?
+  updatedBy String?
+  deletedAt DateTime?
+}
+
+// ---------- Audit ----------
+
+// Append-only: an audit trail that could itself be edited/soft-deleted defeats its
+// purpose, so this model is intentionally excluded from the base-fields convention
+// (see plan decision #4).
 model AuditLog {
   id        String   @id @default(cuid())
   action    String
   entity    String
   entityId  String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
+  userId    String?
+  oldValue  Json?
+  newValue  Json?
+  reason    String?
   createdAt DateTime @default(now())
 }
