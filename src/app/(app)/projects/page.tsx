@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { listUsers } from "@/lib/current-user";
+import { getCurrentPmsByProject } from "@/lib/project-manager";
 import { DeleteButton } from "@/components/DeleteButton";
 import { removeProject } from "./actions";
 
@@ -21,6 +22,7 @@ export default async function ProjectsPage() {
   ]);
 
   const userNameById = new Map(users.map((u) => [u.id, u.name]));
+  const currentPmByProject = await getCurrentPmsByProject(projects.map((p) => p.id));
 
   return (
     <div className="flex flex-col gap-6">
@@ -58,6 +60,7 @@ export default async function ProjectsPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Client</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Project Manager</th>
                 <th className="px-4 py-3 font-medium">Created by</th>
                 <th className="px-4 py-3 font-medium" />
               </tr>
@@ -80,6 +83,9 @@ export default async function ProjectsPage() {
                     >
                       {project.status.replace("_", " ")}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {currentPmByProject.get(project.id)?.user.name ?? "— Unassigned —"}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {(project.createdBy && userNameById.get(project.createdBy)) ?? "—"}

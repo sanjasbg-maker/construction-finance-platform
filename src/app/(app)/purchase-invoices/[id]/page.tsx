@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/current-user";
+import { getCurrentPm } from "@/lib/project-manager";
 import { ApprovalActions } from "../ApprovalActions";
 
 function formatMoney(value: unknown, currency: string) {
@@ -39,6 +40,9 @@ export default async function PurchaseInvoiceDetailPage({
     notFound();
   }
 
+  const assignedPm = await getCurrentPm(invoice.projectId);
+  const isAssignedPm = !!currentUser && assignedPm?.userId === currentUser.id;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
@@ -63,6 +67,7 @@ export default async function PurchaseInvoiceDetailPage({
       <div className="grid max-w-2xl grid-cols-2 gap-x-8 gap-y-3 rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
         <Detail label="Vendor" value={invoice.vendor.name} />
         <Detail label="Project" value={`${invoice.project.code} — ${invoice.project.name}`} />
+        <Detail label="Project Manager" value={assignedPm?.user.name ?? "— Unassigned —"} />
         <Detail label="Contract" value={invoice.contract?.number ?? "—"} />
         <Detail label="SEF Number" value={invoice.sefNumber ?? "—"} />
         <Detail label="Amount" value={formatMoney(invoice.amount, invoice.currency)} />
@@ -71,7 +76,12 @@ export default async function PurchaseInvoiceDetailPage({
       </div>
 
       {currentUser && (
-        <ApprovalActions invoiceId={invoice.id} status={invoice.status} userRole={currentUser.role} />
+        <ApprovalActions
+          invoiceId={invoice.id}
+          status={invoice.status}
+          userRole={currentUser.role}
+          isAssignedPm={isAssignedPm}
+        />
       )}
 
       <div className="flex flex-col gap-3">

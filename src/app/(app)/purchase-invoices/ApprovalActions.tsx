@@ -14,9 +14,10 @@ type Props = {
   invoiceId: string;
   status: string;
   userRole: string;
+  isAssignedPm: boolean;
 };
 
-export function ApprovalActions({ invoiceId, status, userRole }: Props) {
+export function ApprovalActions({ invoiceId, status, userRole, isAssignedPm }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,8 @@ export function ApprovalActions({ invoiceId, status, userRole }: Props) {
 
   const canAct =
     (status === "RECEIVED" && userRole !== "VIEWER") ||
-    (status === "WAITING_PM_APPROVAL" && (userRole === "PROJECT_MANAGER" || userRole === "ADMIN")) ||
+    (status === "WAITING_PM_APPROVAL" &&
+      (userRole === "ADMIN" || (userRole === "PROJECT_MANAGER" && isAssignedPm))) ||
     (status === "APPROVED" && (userRole === "FINANCE" || userRole === "ADMIN")) ||
     (status === "WAITING_DIRECTOR_APPROVAL" && (userRole === "DIRECTOR" || userRole === "ADMIN"));
 

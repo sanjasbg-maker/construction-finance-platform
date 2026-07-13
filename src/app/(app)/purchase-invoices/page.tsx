@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/current-user";
+import { getCurrentPmsByProject } from "@/lib/project-manager";
 import { DeleteButton } from "@/components/DeleteButton";
 import { removePurchaseInvoice } from "./actions";
 
@@ -21,10 +23,15 @@ function formatMoney(value: unknown, currency: string) {
 }
 
 export default async function PurchaseInvoicesPage() {
-  const invoices = await prisma.purchaseInvoice.findMany({
-    include: { vendor: true, project: true },
-    orderBy: { issueDate: "desc" },
-  });
+  const [invoices, currentUser] = await Promise.all([
+    prisma.purchaseInvoice.findMany({
+      include: { vendor: true, project: true },
+      orderBy: { issueDate: "desc" },
+    }),
+    getCurrentUser(),
+  ]);
+
+  const currentPmByProject = await getCurrentPmsByProject(invoices.map((i) => i.projectId));
 
   return (
     <div className="flex flex-col gap-6">
@@ -61,6 +68,7 @@ export default async function PurchaseInvoicesPage() {
                 <th className="px-4 py-3 font-medium">Number</th>
                 <th className="px-4 py-3 font-medium">Vendor</th>
                 <th className="px-4 py-3 font-medium">Project</th>
+                <th className="px-4 py-3 font-medium">Project Manager</th>
                 <th className="px-4 py-3 font-medium">Amount</th>
                 <th className="px-4 py-3 font-medium">Due Date</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -68,7 +76,13 @@ export default async function PurchaseInvoicesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {invoices.map((invoice) => (
+              {invoices.map((invoice) => {
+                const assignedPm = currentPmByProject.get(invoice.projectId);
+                const waitingOnYou =
+                  invoice.status === "WAITING_PM_APPROVAL" &&
+                  !!currentUser &&
+                  (currentUser.role === "ADMIN" || assignedPm?.userId === currentUser.id);
+                return (
                 <tr key={invoice.id}>
                   <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
                     <Link href={`/purchase-invoices/${invoice.id}`} className="hover:underline">
@@ -82,17 +96,27 @@ export default async function PurchaseInvoicesPage() {
                     {invoice.project.code}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {assignedPm?.user.name ?? "— Unassigned —"}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {formatMoney(invoice.amount, invoice.currency)}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {invoice.dueDate.toISOString().slice(0, 10)}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[invoice.status] ?? ""}`}
-                    >
-                      {invoice.status.replace(/_/g, " ")}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[invoice.status] ?? ""}`}
+                      >
+                        {invoice.status.replace(/_/g, " ")}
+                      </span>
+                      {waitingOnYou && (
+                        <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-medium text-white">
+                          Waiting on you
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-4">
@@ -111,7 +135,8 @@ export default async function PurchaseInvoicesPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

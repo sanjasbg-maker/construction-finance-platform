@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma, withUser } from "@/lib/prisma";
 import { requireWriteAccess, requireRole } from "@/lib/authorization";
+import { getCurrentPm } from "@/lib/project-manager";
 import type {
   ApprovalStepRole,
   ApprovalDecision,
@@ -96,6 +97,22 @@ export async function recordPmDecision(
 ): Promise<ApprovalActionResult> {
   const { user, error } = await requireRole(["PROJECT_MANAGER"]);
   if (error || !user) return { success: false, error: error ?? "Unauthorized" };
+
+  // ADMIN bypasses, same as requireRole does everywhere else. A regular
+  // PROJECT_MANAGER may only act on invoices for projects they're currently
+  // assigned to - being a PM at all isn't enough.
+  if (user.role !== "ADMIN") {
+    const invoice = await prisma.purchaseInvoice.findUnique({ where: { id } });
+    if (!invoice) return { success: false, error: "Invoice not found." };
+
+    const assignment = await getCurrentPm(invoice.projectId);
+    if (!assignment || assignment.userId !== user.id) {
+      return {
+        success: false,
+        error: "Only the Project Manager assigned to this project can approve its invoices.",
+      };
+    }
+  }
 
   return recordApprovalDecision({
     purchaseInvoiceId: id,
