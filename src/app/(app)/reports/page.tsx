@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { sumDecimal, formatMoney } from "@/lib/money";
+import { sumDecimal, formatMoney, formatMultiCurrency } from "@/lib/money";
 
 const OUTSTANDING_PURCHASE_STATUSES = [
   "RECEIVED",
@@ -12,22 +12,6 @@ const OUTSTANDING_PURCHASE_STATUSES = [
 ] as const;
 
 const OUTSTANDING_SALES_STATUSES = ["SENT", "PARTIALLY_PAID", "OVERDUE"] as const;
-
-/** Sums are never blended across currencies (no FX conversion in this app) -
- * this groups by currency and formats each subtotal separately. */
-function sumByCurrency(rows: { amount: number; currency: string }[]) {
-  const totals = new Map<string, number>();
-  for (const row of rows) {
-    totals.set(row.currency, (totals.get(row.currency) ?? 0) + row.amount);
-  }
-  return Array.from(totals.entries());
-}
-
-function formatMultiCurrency(rows: { amount: number; currency: string }[]) {
-  const totals = sumByCurrency(rows);
-  if (totals.length === 0) return "—";
-  return totals.map(([currency, amount]) => formatMoney(amount, currency)).join(" + ");
-}
 
 export default async function ReportsPage() {
   const now = new Date();
