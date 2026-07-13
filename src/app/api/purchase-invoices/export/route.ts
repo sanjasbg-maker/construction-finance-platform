@@ -1,6 +1,7 @@
 import Papa from "papaparse";
 import { prisma } from "@/lib/prisma";
 import { sumDecimal } from "@/lib/money";
+import { bucketByDueDate } from "@/lib/aging";
 
 // Same "still owed" status set used by Reports/Dashboard's Outstanding
 // Payables - paid/cancelled invoices don't belong in an aging export.
@@ -13,14 +14,6 @@ const OUTSTANDING_PURCHASE_STATUSES = [
   "PARTIALLY_PAID",
 ] as const;
 
-function agingBucket(daysOverdue: number) {
-  if (daysOverdue <= 0) return "Not yet due";
-  if (daysOverdue <= 30) return "1-30 days";
-  if (daysOverdue <= 60) return "31-60 days";
-  if (daysOverdue <= 90) return "61-90 days";
-  return "90+ days";
-}
-
 export async function GET() {
   const now = new Date();
 
@@ -32,7 +25,7 @@ export async function GET() {
 
   const rows = invoices.map((invoice) => {
     const remaining = Number(invoice.amount) - sumDecimal(invoice.allocations);
-    const daysOverdue = Math.floor((now.getTime() - invoice.dueDate.getTime()) / 86_400_000);
+    const daysUntilDue = Math.ceil((invoice.dueDate.getTime() - now.getTime()) / 86_400_000);
     return {
       "Invoice Number": invoice.number,
       Vendor: invoice.vendor.name,
@@ -42,8 +35,8 @@ export async function GET() {
       Currency: invoice.currency,
       "Issue Date": invoice.issueDate.toISOString().slice(0, 10),
       "Due Date": invoice.dueDate.toISOString().slice(0, 10),
-      "Days Overdue": Math.max(0, daysOverdue),
-      Aging: agingBucket(daysOverdue),
+      "Days Until Due": daysUntilDue,
+      Aging: bucketByDueDate(invoice.dueDate, now),
       Status: invoice.status.replace(/_/g, " "),
     };
   });

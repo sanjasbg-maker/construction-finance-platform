@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { sumDecimal, formatMoney, formatMultiCurrency } from "@/lib/money";
+import { AGING_BUCKETS, bucketByDueDate } from "@/lib/aging";
 
 const OUTSTANDING_PURCHASE_STATUSES = [
   "RECEIVED",
@@ -58,6 +59,17 @@ export default async function ReportsPage() {
     dueDate: inv.dueDate,
     overdue: inv.dueDate < now,
   }));
+
+  const cashFlowBuckets = AGING_BUCKETS.map((bucket) => {
+    const inflow = receivablesRows
+      .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
+      .map((r) => ({ amount: r.remaining, currency: r.currency }));
+    const outflow = payablesRows
+      .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
+      .map((r) => ({ amount: r.remaining, currency: r.currency }));
+    const net = [...inflow, ...outflow.map((r) => ({ ...r, amount: -r.amount }))];
+    return { bucket, inflow, outflow, net };
+  });
 
   const cashRows = bankAccounts.map((account) => {
     const net = account.payments.reduce(
@@ -179,6 +191,47 @@ export default async function ReportsPage() {
             </table>
           </div>
         )}
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+          Cash Flow Forecast (by due date)
+        </h2>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
+          Projected from outstanding invoice due dates only - Outstanding Receivables as
+          inflow, Outstanding Payables as outflow. Doesn&apos;t include advances, retention,
+          or a starting bank balance.
+        </p>
+        <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
+              <tr>
+                <th className="px-4 py-3 font-medium">Period</th>
+                <th className="px-4 py-3 font-medium">Inflow (Receivables)</th>
+                <th className="px-4 py-3 font-medium">Outflow (Payables)</th>
+                <th className="px-4 py-3 font-medium">Net</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              {cashFlowBuckets.map((row) => (
+                <tr key={row.bucket}>
+                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                    {row.bucket}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {formatMultiCurrency(row.inflow)}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {formatMultiCurrency(row.outflow)}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                    {formatMultiCurrency(row.net)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="flex flex-col gap-3">
