@@ -15,6 +15,7 @@ type FieldValues = {
   purpose: PaymentPurpose;
   vendorId: string;
   clientId: string;
+  advancePercent: string;
   bankAccountId: string;
   amount: string;
   currency: string;
@@ -26,6 +27,7 @@ export type PaymentDefaultValues = {
   direction: string;
   vendorId?: string | null;
   clientId?: string | null;
+  advancePercent?: string | null;
   bankAccountId?: string;
   amount?: string;
   currency?: string;
@@ -50,6 +52,7 @@ function toFieldValues(v?: PaymentDefaultValues): FieldValues {
     purpose: v ? purposeFromTypeAndDirection(v.type, v.direction) : "VENDOR_ADVANCE",
     vendorId: v?.vendorId ?? "",
     clientId: v?.clientId ?? "",
+    advancePercent: v?.advancePercent ?? "",
     bankAccountId: v?.bankAccountId ?? "",
     amount: v?.amount ?? "",
     currency: v?.currency ?? "EUR",
@@ -165,6 +168,35 @@ export function PaymentForm({
             ))}
           </select>
           {state.errors?.clientId?.map((err) => (
+            <p key={err} className="mt-1 text-xs text-red-600 dark:text-red-400">
+              {err}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {(values.purpose === "VENDOR_ADVANCE" || values.purpose === "CLIENT_ADVANCE") && (
+        <div>
+          <label
+            htmlFor="advancePercent"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Recoupment % (optional)
+          </label>
+          <input
+            id="advancePercent"
+            name="advancePercent"
+            type="number"
+            step="0.01"
+            value={values.advancePercent}
+            onChange={(e) => updateField("advancePercent", e.target.value)}
+            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          />
+          <p className="mt-2 text-xs text-zinc-400 dark:text-zinc-500">
+            E.g. 20 if this advance is recouped at 20% of each subsequent invoice. Used to
+            suggest an allocation amount later - you can still override it per invoice.
+          </p>
+          {state.errors?.advancePercent?.map((err) => (
             <p key={err} className="mt-1 text-xs text-red-600 dark:text-red-400">
               {err}
             </p>

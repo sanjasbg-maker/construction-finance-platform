@@ -4,22 +4,41 @@ import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { addAllocation } from "./allocation-actions";
 
-type InvoiceOption = { id: string; number: string; remaining: number; currency: string };
+type InvoiceOption = { id: string; number: string; amount: number; remaining: number; currency: string };
+
+function roundTo2(value: number) {
+  return Math.round(value * 100) / 100;
+}
 
 export function AllocationForm({
   paymentId,
   direction,
   invoices,
+  paymentRemaining,
+  advancePercent,
 }: {
   paymentId: string;
   direction: "IN" | "OUT";
   invoices: InvoiceOption[];
+  paymentRemaining: number;
+  advancePercent?: number | null;
 }) {
   const router = useRouter();
   const [invoiceId, setInvoiceId] = useState("");
   const [amount, setAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  function handleInvoiceChange(id: string) {
+    setInvoiceId(id);
+    if (!advancePercent) return;
+    const invoice = invoices.find((inv) => inv.id === id);
+    if (!invoice) return;
+    const suggested = roundTo2(
+      Math.min((advancePercent / 100) * invoice.amount, invoice.remaining, paymentRemaining),
+    );
+    setAmount(suggested > 0 ? String(suggested) : "");
+  }
 
   if (invoices.length === 0) {
     return (
@@ -71,7 +90,7 @@ export function AllocationForm({
         </label>
         <select
           value={invoiceId}
-          onChange={(e) => setInvoiceId(e.target.value)}
+          onChange={(e) => handleInvoiceChange(e.target.value)}
           className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         >
           <option value="">Select an invoice…</option>
@@ -94,6 +113,12 @@ export function AllocationForm({
           onChange={(e) => setAmount(e.target.value)}
           className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
         />
+        {advancePercent && invoiceId && (
+          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+            Suggested from {advancePercent}% recoupment - edit if this invoice needs a different
+            amount.
+          </p>
+        )}
       </div>
 
       <button

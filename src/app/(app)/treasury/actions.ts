@@ -17,6 +17,7 @@ function parseFormData(formData: FormData) {
     purpose: String(formData.get("purpose") ?? "VENDOR_ADVANCE"),
     vendorId: String(formData.get("vendorId") ?? ""),
     clientId: String(formData.get("clientId") ?? ""),
+    advancePercent: String(formData.get("advancePercent") ?? ""),
     bankAccountId: String(formData.get("bankAccountId") ?? ""),
     amount: String(formData.get("amount") ?? ""),
     currency: String(formData.get("currency") ?? "EUR"),

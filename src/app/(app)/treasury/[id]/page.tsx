@@ -44,7 +44,8 @@ export default async function PaymentDetailPage({
   const allocatedTotal = payment.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
   const remaining = Number(payment.amount) - allocatedTotal;
 
-  let eligibleInvoices: { id: string; number: string; remaining: number; currency: string }[] = [];
+  let eligibleInvoices: { id: string; number: string; amount: number; remaining: number; currency: string }[] =
+    [];
   if (remaining > 0.001) {
     if (payment.direction === "OUT") {
       const invoices = await prisma.purchaseInvoice.findMany({
@@ -56,6 +57,7 @@ export default async function PaymentDetailPage({
           id: inv.id,
           number: inv.number,
           currency: inv.currency,
+          amount: Number(inv.amount),
           remaining: Number(inv.amount) - inv.allocations.reduce((a, x) => a + Number(x.amount), 0),
         }))
         .filter((inv) => inv.remaining > 0.001);
@@ -69,6 +71,7 @@ export default async function PaymentDetailPage({
           id: inv.id,
           number: inv.number,
           currency: inv.currency,
+          amount: Number(inv.amount),
           remaining: Number(inv.amount) - inv.allocations.reduce((a, x) => a + Number(x.amount), 0),
         }))
         .filter((inv) => inv.remaining > 0.001);
@@ -103,6 +106,9 @@ export default async function PaymentDetailPage({
         <Detail label="Date" value={payment.date.toISOString().slice(0, 10)} />
         <Detail label="Allocated" value={formatMoney(allocatedTotal, payment.currency)} />
         <Detail label="Remaining" value={formatMoney(remaining, payment.currency)} />
+        {payment.advancePercent && (
+          <Detail label="Recoupment %" value={`${payment.advancePercent.toString()}%`} />
+        )}
       </div>
 
       <div className="flex flex-col gap-3">
@@ -135,7 +141,13 @@ export default async function PaymentDetailPage({
       </div>
 
       {remaining > 0.001 && (
-        <AllocationForm paymentId={payment.id} direction={payment.direction} invoices={eligibleInvoices} />
+        <AllocationForm
+          paymentId={payment.id}
+          direction={payment.direction}
+          invoices={eligibleInvoices}
+          paymentRemaining={remaining}
+          advancePercent={payment.advancePercent ? Number(payment.advancePercent) : null}
+        />
       )}
     </div>
   );

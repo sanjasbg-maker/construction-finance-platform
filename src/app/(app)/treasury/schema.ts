@@ -35,6 +35,15 @@ export const paymentSchema = z
     purpose: z.enum(paymentPurposes),
     vendorId: z.string().trim().optional().or(z.literal("")),
     clientId: z.string().trim().optional().or(z.literal("")),
+    advancePercent: z
+      .string()
+      .trim()
+      .optional()
+      .or(z.literal(""))
+      .refine(
+        (v) => !v || (!Number.isNaN(Number(v)) && Number(v) > 0 && Number(v) <= 100),
+        "Recoupment percent must be between 0 and 100",
+      ),
     ...basePaymentFields,
   })
   .refine((data) => data.purpose !== "VENDOR_ADVANCE" || data.vendorId, {
@@ -65,6 +74,7 @@ export function toPaymentData(input: PaymentInput) {
     clientId: input.purpose === "CLIENT_ADVANCE" ? input.clientId || null : null,
     amount: input.amount,
     originalAmount: isAdvance ? input.amount : null,
+    advancePercent: isAdvance ? input.advancePercent || null : null,
     currency: input.currency,
     date: new Date(input.date),
   };

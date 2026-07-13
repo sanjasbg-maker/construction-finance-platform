@@ -49,6 +49,7 @@ export default async function EditPaymentPage({
             direction: payment.direction,
             vendorId: payment.vendorId,
             clientId: payment.clientId,
+            advancePercent: payment.advancePercent?.toString() ?? "",
             bankAccountId: payment.bankAccountId,
             amount: payment.amount.toString(),
             currency: payment.currency,

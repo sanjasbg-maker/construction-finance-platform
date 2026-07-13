@@ -511,6 +511,13 @@ model Payment {
   // Only set when type is VENDOR_ADVANCE or CLIENT_ADVANCE. Consumed/remaining
   // amounts are computed from `allocations`, not stored (see plan decision #5).
   originalAmount    Decimal?         @db.Decimal(14, 2)
+  // Contractual recoupment rate for an advance (e.g. 20%) - when set, the
+  // allocation UI suggests amount = advancePercent% x invoice amount instead
+  // of requiring a fully manual figure per invoice. Only meaningful when type
+  // is VENDOR_ADVANCE or CLIENT_ADVANCE; a suggestion, not an enforced rule,
+  // since Finance can always override it (e.g. the final invoice needs to
+  // consume whatever remains regardless of the percentage).
+  advancePercent    Decimal?         @db.Decimal(5, 2)
   bankTransactionId String?          @unique
   bankTransaction   BankTransaction? @relation(fields: [bankTransactionId], references: [id])
 
