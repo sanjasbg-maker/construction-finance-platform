@@ -44,12 +44,21 @@ export default async function PurchaseInvoicesPage() {
             Vendor invoices received via SEF, through PM, Finance, and Director approval to payment.
           </p>
         </div>
-        <Link
-          href="/purchase-invoices/new"
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-        >
-          Add Purchase Invoice
-        </Link>
+        <div className="flex items-center gap-3">
+          <a
+            href="/api/purchase-invoices/export"
+            title="Downloads outstanding invoices as CSV, sorted by due date with an aging bucket per row - opens directly in Excel."
+            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 dark:border-zinc-700 dark:text-zinc-300"
+          >
+            Export to Excel
+          </a>
+          <Link
+            href="/purchase-invoices/new"
+            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+          >
+            Add Purchase Invoice
+          </Link>
+        </div>
       </div>
 
       {invoices.length === 0 ? (
