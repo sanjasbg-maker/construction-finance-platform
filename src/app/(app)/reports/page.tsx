@@ -1,7 +1,17 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { sumDecimal, formatMoney, formatMultiCurrency } from "@/lib/money";
+import { sumDecimal, sumByCurrency, formatMoney, formatMultiCurrency } from "@/lib/money";
 import { AGING_BUCKETS, bucketByDueDate } from "@/lib/aging";
+
+// Retention that hasn't been released yet doesn't have a firm date the way
+// invoice due dates do (Retention.releaseDate is optional) - "Unscheduled"
+// holds anything without one instead of guessing.
+const FORECAST_BUCKETS = [...AGING_BUCKETS, "Unscheduled"] as const;
+type ForecastBucket = (typeof FORECAST_BUCKETS)[number];
+
+function bucketByReleaseDate(releaseDate: Date | null, now: Date): ForecastBucket {
+  return releaseDate ? bucketByDueDate(releaseDate, now) : "Unscheduled";
+}
 
 const OUTSTANDING_PURCHASE_STATUSES = [
   "RECEIVED",
@@ -17,26 +27,32 @@ const OUTSTANDING_SALES_STATUSES = ["SENT", "PARTIALLY_PAID", "OVERDUE"] as cons
 export default async function ReportsPage() {
   const now = new Date();
 
-  const [purchaseInvoices, salesInvoices, bankAccounts, projects] = await Promise.all([
-    prisma.purchaseInvoice.findMany({
-      where: { status: { in: [...OUTSTANDING_PURCHASE_STATUSES] } },
-      include: { vendor: true, project: true, allocations: true },
-      orderBy: { dueDate: "asc" },
-    }),
-    prisma.salesInvoice.findMany({
-      where: { status: { in: [...OUTSTANDING_SALES_STATUSES] } },
-      include: { client: true, project: true, allocations: true },
-      orderBy: { dueDate: "asc" },
-    }),
-    prisma.bankAccount.findMany({
-      include: { payments: true },
-      orderBy: { name: "asc" },
-    }),
-    prisma.project.findMany({
-      include: { client: true, contracts: true, purchaseInvoices: true, salesInvoices: true },
-      orderBy: { name: "asc" },
-    }),
-  ]);
+  const [purchaseInvoices, salesInvoices, bankAccounts, projects, retentions, advancePayments] =
+    await Promise.all([
+      prisma.purchaseInvoice.findMany({
+        where: { status: { in: [...OUTSTANDING_PURCHASE_STATUSES] } },
+        include: { vendor: true, project: true, allocations: true },
+        orderBy: { dueDate: "asc" },
+      }),
+      prisma.salesInvoice.findMany({
+        where: { status: { in: [...OUTSTANDING_SALES_STATUSES] } },
+        include: { client: true, project: true, allocations: true },
+        orderBy: { dueDate: "asc" },
+      }),
+      prisma.bankAccount.findMany({
+        include: { payments: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.project.findMany({
+        include: { client: true, contracts: true, purchaseInvoices: true, salesInvoices: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.retention.findMany({ where: { status: { in: ["HELD", "PARTIALLY_RELEASED"] } } }),
+      prisma.payment.findMany({
+        where: { type: { in: ["VENDOR_ADVANCE", "CLIENT_ADVANCE"] } },
+        include: { allocations: true },
+      }),
+    ]);
 
   const payablesRows = purchaseInvoices.map((inv) => ({
     id: inv.id,
@@ -60,17 +76,6 @@ export default async function ReportsPage() {
     overdue: inv.dueDate < now,
   }));
 
-  const cashFlowBuckets = AGING_BUCKETS.map((bucket) => {
-    const inflow = receivablesRows
-      .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
-      .map((r) => ({ amount: r.remaining, currency: r.currency }));
-    const outflow = payablesRows
-      .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
-      .map((r) => ({ amount: r.remaining, currency: r.currency }));
-    const net = [...inflow, ...outflow.map((r) => ({ ...r, amount: -r.amount }))];
-    return { bucket, inflow, outflow, net };
-  });
-
   const cashRows = bankAccounts.map((account) => {
     const net = account.payments.reduce(
       (acc, p) => acc + (p.direction === "IN" ? Number(p.amount) : -Number(p.amount)),
@@ -78,6 +83,102 @@ export default async function ReportsPage() {
     );
     return { id: account.id, name: account.name, currency: account.currency, net };
   });
+
+  // Retention held against a specific invoice is deliberately unpaid/uncollected -
+  // it shouldn't be projected as due on the invoice's own due date (it moves on
+  // release, which is usually much later, per BUSINESS_RULES.md #7 "Retention is
+  // never treated as payment"). Build per-invoice retained totals so the forecast
+  // can net them out of the invoice's own bucket and bucket them separately by
+  // releaseDate instead.
+  const retainedByPurchaseInvoice = new Map<string, number>();
+  const retainedBySalesInvoice = new Map<string, number>();
+  for (const r of retentions) {
+    if (r.direction === "COMPANY_FROM_VENDOR" && r.purchaseInvoiceId) {
+      retainedByPurchaseInvoice.set(
+        r.purchaseInvoiceId,
+        (retainedByPurchaseInvoice.get(r.purchaseInvoiceId) ?? 0) + Number(r.amount),
+      );
+    }
+    if (r.direction === "CLIENT_FROM_COMPANY" && r.salesInvoiceId) {
+      retainedBySalesInvoice.set(
+        r.salesInvoiceId,
+        (retainedBySalesInvoice.get(r.salesInvoiceId) ?? 0) + Number(r.amount),
+      );
+    }
+  }
+
+  const forecastPayableRows = payablesRows.map((r) => ({
+    ...r,
+    remaining: Math.max(0, r.remaining - (retainedByPurchaseInvoice.get(r.id) ?? 0)),
+  }));
+  const forecastReceivableRows = receivablesRows.map((r) => ({
+    ...r,
+    remaining: Math.max(0, r.remaining - (retainedBySalesInvoice.get(r.id) ?? 0)),
+  }));
+
+  const retentionOutflowRows = retentions
+    .filter((r) => r.direction === "COMPANY_FROM_VENDOR")
+    .map((r) => ({ amount: Number(r.amount), currency: r.currency, releaseDate: r.releaseDate }));
+  const retentionInflowRows = retentions
+    .filter((r) => r.direction === "CLIENT_FROM_COMPANY")
+    .map((r) => ({ amount: Number(r.amount), currency: r.currency, releaseDate: r.releaseDate }));
+
+  const cashFlowBuckets = FORECAST_BUCKETS.map((bucket) => {
+    const inflow = [
+      ...forecastReceivableRows
+        .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
+        .map((r) => ({ amount: r.remaining, currency: r.currency })),
+      ...retentionInflowRows
+        .filter((r) => bucketByReleaseDate(r.releaseDate, now) === bucket)
+        .map((r) => ({ amount: r.amount, currency: r.currency })),
+    ];
+    const outflow = [
+      ...forecastPayableRows
+        .filter((r) => bucketByDueDate(r.dueDate, now) === bucket)
+        .map((r) => ({ amount: r.remaining, currency: r.currency })),
+      ...retentionOutflowRows
+        .filter((r) => bucketByReleaseDate(r.releaseDate, now) === bucket)
+        .map((r) => ({ amount: r.amount, currency: r.currency })),
+    ];
+    const net = [...inflow, ...outflow.map((r) => ({ ...r, amount: -r.amount }))];
+    return { bucket, inflow, outflow, net };
+  });
+
+  // Opening balance = current Cash Position (see below), summed across all bank
+  // accounts per currency rather than per-account, since the forecast walks
+  // forward as one running total per currency.
+  const runningBalance = new Map<string, number>(
+    sumByCurrency(cashRows.map((r) => ({ amount: r.net, currency: r.currency }))),
+  );
+  const openingBalanceEntries = Array.from(runningBalance.entries()).map(([currency, amount]) => ({
+    amount,
+    currency,
+  }));
+  const cashFlowRowsWithBalance = cashFlowBuckets.map((row) => {
+    for (const [currency, amount] of sumByCurrency(row.net)) {
+      runningBalance.set(currency, (runningBalance.get(currency) ?? 0) + amount);
+    }
+    const balance = Array.from(runningBalance.entries()).map(([currency, amount]) => ({ amount, currency }));
+    return { ...row, balance };
+  });
+
+  // Advances are already-completed Payments (money already sent/received), so
+  // they're already reflected in the opening balance above - re-adding them as
+  // a projected future flow would double-count them. Shown separately, for
+  // visibility into unconsumed prepayments only, not folded into the Net math.
+  const advanceRows = advancePayments
+    .map((p) => ({
+      type: p.type,
+      currency: p.currency,
+      remaining: Number(p.originalAmount ?? p.amount) - sumDecimal(p.allocations),
+    }))
+    .filter((r) => r.remaining > 0.005);
+  const vendorAdvancesUnconsumed = advanceRows
+    .filter((r) => r.type === "VENDOR_ADVANCE")
+    .map((r) => ({ amount: r.remaining, currency: r.currency }));
+  const clientAdvancesUnconsumed = advanceRows
+    .filter((r) => r.type === "CLIENT_ADVANCE")
+    .map((r) => ({ amount: r.remaining, currency: r.currency }));
 
   const projectRows = projects.map((project) => ({
     id: project.id,
@@ -195,25 +296,49 @@ export default async function ReportsPage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
-          Cash Flow Forecast (by due date)
+          Cash Flow Forecast (by due / release date)
         </h2>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          Projected from outstanding invoice due dates only - Outstanding Receivables as
-          inflow, Outstanding Payables as outflow. Doesn&apos;t include advances, retention,
-          or a starting bank balance.
+          Opening balance is today&apos;s Cash Position (below), then each period adds
+          Outstanding Receivables and incoming (client-held) retention releases as inflow,
+          and Outstanding Payables and outgoing (vendor-held) retention releases as outflow.
+          Retention tied to a specific invoice is excluded from that invoice&apos;s own row
+          here and counted on its release date instead - held-back money doesn&apos;t move on
+          the invoice&apos;s due date. Retention without a release date falls into
+          &quot;Unscheduled&quot;.
         </p>
+        {(vendorAdvancesUnconsumed.length > 0 || clientAdvancesUnconsumed.length > 0) && (
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
+            Unconsumed advances - already paid/received, already reflected in the opening
+            balance below, not projected again as a future flow: paid to vendors{" "}
+            {formatMultiCurrency(vendorAdvancesUnconsumed)}, received from clients{" "}
+            {formatMultiCurrency(clientAdvancesUnconsumed)}.
+          </p>
+        )}
         <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
           <table className="w-full text-left text-sm">
             <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Period</th>
-                <th className="px-4 py-3 font-medium">Inflow (Receivables)</th>
-                <th className="px-4 py-3 font-medium">Outflow (Payables)</th>
+                <th className="px-4 py-3 font-medium">Inflow</th>
+                <th className="px-4 py-3 font-medium">Outflow</th>
                 <th className="px-4 py-3 font-medium">Net</th>
+                <th className="px-4 py-3 font-medium">Balance</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {cashFlowBuckets.map((row) => (
+              <tr className="bg-zinc-50 dark:bg-zinc-950">
+                <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                  Opening Balance
+                </td>
+                <td className="px-4 py-3 text-zinc-400 dark:text-zinc-500">—</td>
+                <td className="px-4 py-3 text-zinc-400 dark:text-zinc-500">—</td>
+                <td className="px-4 py-3 text-zinc-400 dark:text-zinc-500">—</td>
+                <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                  {formatMultiCurrency(openingBalanceEntries)}
+                </td>
+              </tr>
+              {cashFlowRowsWithBalance.map((row) => (
                 <tr key={row.bucket}>
                   <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
                     {row.bucket}
@@ -224,8 +349,11 @@ export default async function ReportsPage() {
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {formatMultiCurrency(row.outflow)}
                   </td>
-                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
                     {formatMultiCurrency(row.net)}
+                  </td>
+                  <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">
+                    {formatMultiCurrency(row.balance)}
                   </td>
                 </tr>
               ))}
