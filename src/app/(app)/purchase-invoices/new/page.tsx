@@ -47,6 +47,7 @@ export default async function NewPurchaseInvoicePage() {
           vendors={vendors}
           projects={projects}
           contracts={contracts}
+          showImport
         />
       )}
     </div>
