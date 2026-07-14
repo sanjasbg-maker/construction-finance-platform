@@ -5,10 +5,15 @@ const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 
 // Models excluded from the soft-delete / base-fields convention: they're append-only
 // by design (see plan decision #4 — an audit trail or a historical exchange rate that
-// could itself be edited or soft-deleted defeats its own purpose).
-const APPEND_ONLY_MODELS = new Set(["AuditLog", "ExchangeRate"]);
+// could itself be edited or soft-deleted defeats its own purpose). Session joins this
+// set for a different reason - it has none of the base fields at all (no deletedAt/
+// createdBy/updatedBy), and logging out should hard-delete the row, not soft-delete a
+// session token that would otherwise remain sitting in the table.
+const APPEND_ONLY_MODELS = new Set(["AuditLog", "ExchangeRate", "Session"]);
 
-// Fields every other model carries that aren't meaningful in an audit diff.
+// Fields every other model carries that aren't meaningful in an audit diff, plus
+// passwordHash specifically - a credential's old/new hash has no business sitting in
+// AuditLog even though it's salted, not plaintext.
 const HOUSEKEEPING_FIELDS = new Set([
   "id",
   "createdAt",
@@ -16,6 +21,7 @@ const HOUSEKEEPING_FIELDS = new Set([
   "createdBy",
   "updatedBy",
   "deletedAt",
+  "passwordHash",
 ]);
 
 function uncapitalize(model: string) {

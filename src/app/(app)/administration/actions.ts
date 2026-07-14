@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma, withUser } from "@/lib/prisma";
 import { requireRole } from "@/lib/authorization";
+import { hashPassword } from "@/lib/auth";
 import { userSchema, toUserData, type UserInput } from "./schema";
 
 export type UserFormState = {
@@ -17,6 +18,7 @@ function parseFormData(formData: FormData) {
     name: String(formData.get("name") ?? ""),
     email: String(formData.get("email") ?? ""),
     role: String(formData.get("role") ?? ""),
+    password: String(formData.get("password") ?? ""),
   };
 }
 
@@ -44,7 +46,11 @@ export async function createUser(
     return { message: "A user with this email already exists.", values: raw };
   }
 
-  await withUser(user.id).user.create({ data: toUserData(parsed.data) });
+  const passwordHash = parsed.data.password ? await hashPassword(parsed.data.password) : undefined;
+
+  await withUser(user.id).user.create({
+    data: { ...toUserData(parsed.data), ...(passwordHash ? { passwordHash } : {}) },
+  });
   revalidatePath("/administration");
   redirect("/administration");
 }
@@ -76,7 +82,12 @@ export async function updateUser(
     }
   }
 
-  await withUser(user.id).user.update({ where: { id }, data: toUserData(parsed.data) });
+  const passwordHash = parsed.data.password ? await hashPassword(parsed.data.password) : undefined;
+
+  await withUser(user.id).user.update({
+    where: { id },
+    data: { ...toUserData(parsed.data), ...(passwordHash ? { passwordHash } : {}) },
+  });
   revalidatePath("/administration");
   redirect("/administration");
 }

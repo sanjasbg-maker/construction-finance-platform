@@ -1,11 +1,15 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { revalidatePath } from "next/cache";
-import { ACTIVE_USER_COOKIE } from "@/lib/current-user";
+import { redirect } from "next/navigation";
+import { SESSION_COOKIE, destroySession } from "@/lib/auth";
 
-export async function setActiveUser(userId: string) {
+export async function logout() {
   const cookieStore = await cookies();
-  cookieStore.set(ACTIVE_USER_COOKIE, userId, { path: "/" });
-  revalidatePath("/", "layout");
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (token) {
+    await destroySession(token);
+  }
+  cookieStore.delete(SESSION_COOKIE);
+  redirect("/login");
 }

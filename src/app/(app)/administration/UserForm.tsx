@@ -10,9 +10,11 @@ const initialState: UserFormState = {};
 export function UserForm({
   action,
   defaultValues,
+  mode = "create",
 }: {
   action: (prevState: UserFormState, formData: FormData) => Promise<UserFormState>;
   defaultValues?: { name?: string; email?: string; role?: string };
+  mode?: "create" | "edit";
 }) {
   const [state, formAction, pending] = useActionState(action, initialState);
   const values = state.values ?? defaultValues ?? {};
@@ -78,6 +80,30 @@ export function UserForm({
         </select>
         {state.errors?.role && (
           <p className="mt-1 text-xs text-red-600 dark:text-red-400">{state.errors.role[0]}</p>
+        )}
+      </div>
+
+      <div>
+        <label
+          htmlFor="password"
+          className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
+          {mode === "edit" ? "Reset Password (optional)" : "Password (optional)"}
+        </label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="new-password"
+          className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        />
+        <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+          {mode === "edit"
+            ? "Leave blank to keep their current password unchanged."
+            : "Leave blank to add this user without a password - they won't be able to log in until one is set."}
+        </p>
+        {state.errors?.password && (
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">{state.errors.password[0]}</p>
         )}
       </div>
 

@@ -3,16 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { modules } from "@/lib/modules";
-import { UserSwitcher } from "@/components/UserSwitcher";
-
-type UserOption = { id: string; name: string; role: string };
+import { UserMenu } from "@/components/UserMenu";
 
 export function Sidebar({
-  users,
-  activeUserId,
+  currentUser,
 }: {
-  users: UserOption[];
-  activeUserId?: string;
+  currentUser: { name: string; role: string };
 }) {
   const pathname = usePathname();
 
@@ -44,7 +40,7 @@ export function Sidebar({
         })}
       </nav>
       <div className="border-t border-zinc-200 dark:border-zinc-800">
-        <UserSwitcher users={users} activeUserId={activeUserId} />
+        <UserMenu currentUser={currentUser} />
       </div>
     </aside>
   );

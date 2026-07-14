@@ -21,6 +21,7 @@ export default async function EditUserPage({
       <UserForm
         action={updateUser.bind(null, id)}
         defaultValues={{ name: user.name, email: user.email, role: user.role }}
+        mode="edit"
       />
     </div>
   );

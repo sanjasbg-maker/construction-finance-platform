@@ -136,6 +136,9 @@ model User {
   name  String
   email String   @unique
   role  UserRole @default(VIEWER)
+  // Null means no password has been set yet - that user cannot log in until
+  // an ADMIN sets one via Administration (see src/lib/auth.ts / Session below).
+  passwordHash String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -146,6 +149,19 @@ model User {
   pmAssignments     ProjectManagerAssignment[]
   approvalSteps     ApprovalStep[]
   situationsActedOn Situation[]
+  sessions          Session[]
+}
+
+// Real login sessions. The raw token lives only in an httpOnly cookie; only
+// its SHA-256 hash is stored here, so a DB leak alone can't be used to hijack
+// a session. Deleting a row logs that session out immediately.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }
 
 // ---------- Clients / Vendors ----------

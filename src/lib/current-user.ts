@@ -1,24 +1,18 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
-
-export const ACTIVE_USER_COOKIE = "active-user-id";
+import { SESSION_COOKIE, verifySession } from "@/lib/auth";
 
 /**
- * Dev-only "acting as" stub in place of real authentication (see plan decision on
- * auth scope). Reads the active user id from a cookie, falling back to the
- * earliest-created seeded user so there's always a current user to attribute writes
- * to.
+ * Reads the session cookie and verifies it against the Session table. No
+ * fallback: a missing or invalid session means null, full stop - middleware
+ * already guarantees a valid session for anything under (app), so this only
+ * legitimately returns null for routes outside that guard (e.g. /login).
  */
 export async function getCurrentUser() {
   const cookieStore = await cookies();
-  const activeUserId = cookieStore.get(ACTIVE_USER_COOKIE)?.value;
-
-  if (activeUserId) {
-    const user = await prisma.user.findUnique({ where: { id: activeUserId } });
-    if (user) return user;
-  }
-
-  return prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!token) return null;
+  return verifySession(token);
 }
 
 export async function listUsers() {
