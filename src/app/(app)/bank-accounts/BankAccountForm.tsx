@@ -11,12 +11,14 @@ type DefaultValues = {
   name?: string;
   iban?: string | null;
   currency?: string;
+  openingBalance?: string | null;
 };
 
 type FieldValues = {
   name: string;
   iban: string;
   currency: string;
+  openingBalance: string;
 };
 
 function toFieldValues(v?: DefaultValues): FieldValues {
@@ -24,6 +26,7 @@ function toFieldValues(v?: DefaultValues): FieldValues {
     name: v?.name ?? "",
     iban: v?.iban ?? "",
     currency: v?.currency ?? "EUR",
+    openingBalance: v?.openingBalance ?? "0",
   };
 }
 
@@ -87,6 +90,20 @@ export function BankAccountForm({
         </select>
       </div>
 
+      <Field
+        label="Opening Balance"
+        name="openingBalance"
+        type="number"
+        value={values.openingBalance}
+        onChange={(v) => updateField("openingBalance", v)}
+        errors={state.errors?.openingBalance}
+      />
+      <p className="-mt-3 text-xs text-zinc-400 dark:text-zinc-500">
+        Balance as of when this account started being tracked here (e.g. migrating from a
+        previous accounting system) - Cash Position adds this to the net of all recorded
+        payments.
+      </p>
+
       <div className="flex gap-3 pt-2">
         <button
           type="submit"
@@ -136,6 +153,7 @@ function Field({
         id={name}
         name={name}
         type={type}
+        step={type === "number" ? "0.01" : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"

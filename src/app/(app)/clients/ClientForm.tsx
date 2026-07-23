@@ -4,6 +4,7 @@ import { useActionState, useState, useTransition, type ChangeEvent } from "react
 import Link from "next/link";
 import type { ClientFormState } from "./actions";
 import { extractClientFromPdf } from "./extract-actions";
+import { currencies } from "./schema";
 
 const initialState: ClientFormState = {};
 
@@ -12,6 +13,8 @@ type DefaultValues = {
   taxId?: string | null;
   email?: string | null;
   phone?: string | null;
+  openingBalance?: string | null;
+  openingBalanceCurrency?: string | null;
 };
 
 type FieldValues = {
@@ -19,6 +22,8 @@ type FieldValues = {
   taxId: string;
   email: string;
   phone: string;
+  openingBalance: string;
+  openingBalanceCurrency: string;
 };
 
 function toFieldValues(v?: DefaultValues): FieldValues {
@@ -27,6 +32,8 @@ function toFieldValues(v?: DefaultValues): FieldValues {
     taxId: v?.taxId ?? "",
     email: v?.email ?? "",
     phone: v?.phone ?? "",
+    openingBalance: v?.openingBalance ?? "0",
+    openingBalanceCurrency: v?.openingBalanceCurrency ?? "EUR",
   };
 }
 
@@ -64,6 +71,7 @@ export function ClientForm({
         return;
       }
       setValues((prev) => ({
+        ...prev,
         name: result.data.name ?? prev.name,
         taxId: result.data.taxId ?? prev.taxId,
         email: result.data.email ?? prev.email,
@@ -137,6 +145,42 @@ export function ClientForm({
         errors={state.errors?.phone}
       />
 
+      <div className="grid grid-cols-2 gap-4">
+        <Field
+          label="Opening Balance"
+          name="openingBalance"
+          type="number"
+          value={values.openingBalance}
+          onChange={(v) => updateField("openingBalance", v)}
+          errors={state.errors?.openingBalance}
+        />
+        <div>
+          <label
+            htmlFor="openingBalanceCurrency"
+            className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300"
+          >
+            Currency
+          </label>
+          <select
+            id="openingBalanceCurrency"
+            name="openingBalanceCurrency"
+            value={values.openingBalanceCurrency}
+            onChange={(e) => updateField("openingBalanceCurrency", e.target.value)}
+            className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+          >
+            {currencies.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <p className="-mt-3 text-xs text-zinc-400 dark:text-zinc-500">
+        Amount owed by this client carried over from a previous accounting system - not tied
+        to a specific invoice.
+      </p>
+
       <div className="flex gap-3 pt-2">
         <button
           type="submit"
@@ -186,6 +230,7 @@ function Field({
         id={name}
         name={name}
         type={type}
+        step={type === "number" ? "0.01" : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"

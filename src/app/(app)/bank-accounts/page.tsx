@@ -47,6 +47,7 @@ export default async function BankAccountsPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">IBAN</th>
                 <th className="px-4 py-3 font-medium">Currency</th>
+                <th className="px-4 py-3 font-medium">Opening Balance</th>
                 <th className="px-4 py-3 font-medium">Created by</th>
                 <th className="px-4 py-3 font-medium" />
               </tr>
@@ -61,6 +62,13 @@ export default async function BankAccountsPage() {
                     {account.iban ?? "—"}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {account.currency}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                    {Number(account.openingBalance).toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
                     {account.currency}
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">

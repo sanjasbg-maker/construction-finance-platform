@@ -31,6 +31,8 @@ export default async function DashboardPage() {
     advancePayments,
     projectCounts,
     contractCounts,
+    vendorsWithOpeningBalance,
+    clientsWithOpeningBalance,
   ] = await Promise.all([
     prisma.purchaseInvoice.findMany({
       where: { status: { in: [...OUTSTANDING_PURCHASE_STATUSES] } },
@@ -55,7 +57,18 @@ export default async function DashboardPage() {
     }),
     prisma.project.groupBy({ by: ["status"], _count: { _all: true } }),
     prisma.contract.groupBy({ by: ["status"], _count: { _all: true } }),
+    prisma.vendor.findMany({ where: { openingBalance: { not: 0 } } }),
+    prisma.client.findMany({ where: { openingBalance: { not: 0 } } }),
   ]);
+
+  const vendorOpeningBalanceRows = vendorsWithOpeningBalance.map((v) => ({
+    amount: Number(v.openingBalance),
+    currency: v.openingBalanceCurrency,
+  }));
+  const clientOpeningBalanceRows = clientsWithOpeningBalance.map((c) => ({
+    amount: Number(c.openingBalance),
+    currency: c.openingBalanceCurrency,
+  }));
 
   const payablesRows = purchaseInvoices.map((inv) => ({
     id: inv.id,
@@ -85,7 +98,7 @@ export default async function DashboardPage() {
   const cashRows = bankAccounts.map((account) => {
     const net = account.payments.reduce(
       (acc, p) => acc + (p.direction === "IN" ? Number(p.amount) : -Number(p.amount)),
-      0,
+      Number(account.openingBalance),
     );
     return { id: account.id, name: account.name, currency: account.currency, net };
   });
@@ -138,14 +151,20 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Outstanding Payables"
-          value={formatMultiCurrency(payablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })))}
-          hint={`${payablesRows.length} open invoice${payablesRows.length === 1 ? "" : "s"}`}
+          value={formatMultiCurrency([
+            ...payablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })),
+            ...vendorOpeningBalanceRows,
+          ])}
+          hint={`${payablesRows.length} open invoice${payablesRows.length === 1 ? "" : "s"}${vendorOpeningBalanceRows.length > 0 ? " + opening balances" : ""}`}
           href="/reports"
         />
         <KpiCard
           label="Outstanding Receivables"
-          value={formatMultiCurrency(receivablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })))}
-          hint={`${receivablesRows.length} open invoice${receivablesRows.length === 1 ? "" : "s"}`}
+          value={formatMultiCurrency([
+            ...receivablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })),
+            ...clientOpeningBalanceRows,
+          ])}
+          hint={`${receivablesRows.length} open invoice${receivablesRows.length === 1 ? "" : "s"}${clientOpeningBalanceRows.length > 0 ? " + opening balances" : ""}`}
           href="/reports"
         />
         <KpiCard
@@ -199,8 +218,8 @@ export default async function DashboardPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Bank Balances</h2>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          Net of all recorded Treasury payments (incoming minus outgoing). Not a true bank
-          balance — this app doesn&apos;t track opening balances.
+          Opening balance plus the net of all recorded Treasury payments (incoming minus
+          outgoing).
         </p>
         {cashRows.length === 0 ? (
           <EmptyRow />

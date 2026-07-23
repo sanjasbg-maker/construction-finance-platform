@@ -172,6 +172,11 @@ model Client {
   taxId String?
   email String?
   phone String?
+  // Lump-sum receivable carried over from a previous accounting system as of
+  // when this client started being tracked here - not tied to a specific
+  // invoice (see plan decision on Vendor/Client opening balances).
+  openingBalance         Decimal  @default(0) @db.Decimal(14, 2)
+  openingBalanceCurrency Currency @default(EUR)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -191,6 +196,11 @@ model Vendor {
   email        String?
   phone        String?
   paymentTerms String?
+  // Lump-sum payable carried over from a previous accounting system as of
+  // when this vendor started being tracked here - not tied to a specific
+  // invoice (see plan decision on Vendor/Client opening balances).
+  openingBalance         Decimal  @default(0) @db.Decimal(14, 2)
+  openingBalanceCurrency Currency @default(EUR)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -459,6 +469,10 @@ model BankAccount {
   name     String
   iban     String?
   currency Currency
+  // Balance as of when this account started being tracked in the app (e.g.
+  // migrating from a previous system) - Cash Position = this + net of all
+  // recorded Payments, instead of assuming the account started at zero.
+  openingBalance Decimal @default(0) @db.Decimal(14, 2)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

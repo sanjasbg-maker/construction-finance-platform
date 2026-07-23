@@ -28,6 +28,7 @@ function parseFormData(formData: FormData) {
     name: String(formData.get("name") ?? ""),
     iban: String(formData.get("iban") ?? ""),
     currency: String(formData.get("currency") ?? "EUR"),
+    openingBalance: String(formData.get("openingBalance") ?? ""),
   };
 }
 

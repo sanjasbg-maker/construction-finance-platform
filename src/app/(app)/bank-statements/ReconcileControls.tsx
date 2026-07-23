@@ -2,9 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { reconcileTransaction, autoReconcileStatement } from "./reconcile-actions";
+import {
+  reconcileTransaction,
+  autoReconcileStatement,
+  settleInvoiceFromTransaction,
+} from "./reconcile-actions";
 
 type PaymentOption = { id: string; label: string; direction: "IN" | "OUT" };
+type InvoiceOption = { id: string; label: string };
 
 type TransactionRow = {
   id: string;
@@ -20,16 +25,19 @@ export function ReconcileControls({
   statementId,
   transactions,
   candidatePayments,
+  openInvoices,
 }: {
   statementId: string;
   transactions: TransactionRow[];
   candidatePayments: PaymentOption[];
+  openInvoices: InvoiceOption[];
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [autoMessage, setAutoMessage] = useState<string | null>(null);
   const [rowError, setRowError] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<Record<string, string>>({});
+  const [selectedInvoice, setSelectedInvoice] = useState<Record<string, string>>({});
 
   function runAuto() {
     setAutoMessage(null);
@@ -52,6 +60,20 @@ export function ReconcileControls({
     setRowError((prev) => ({ ...prev, [transactionId]: "" }));
     startTransition(async () => {
       const result = await reconcileTransaction(transactionId, paymentId);
+      if (!result.success) {
+        setRowError((prev) => ({ ...prev, [transactionId]: result.error }));
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function runSettle(transactionId: string) {
+    const purchaseInvoiceId = selectedInvoice[transactionId];
+    if (!purchaseInvoiceId) return;
+    setRowError((prev) => ({ ...prev, [transactionId]: "" }));
+    startTransition(async () => {
+      const result = await settleInvoiceFromTransaction(transactionId, purchaseInvoiceId);
       if (!result.success) {
         setRowError((prev) => ({ ...prev, [transactionId]: result.error }));
         return;
@@ -115,29 +137,57 @@ export function ReconcileControls({
                   </td>
                   <td className="px-4 py-3">
                     {!t.reconciled && (
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={selected[t.id] ?? ""}
-                          onChange={(e) =>
-                            setSelected((prev) => ({ ...prev, [t.id]: e.target.value }))
-                          }
-                          className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-                        >
-                          <option value="">Match to payment…</option>
-                          {rowCandidates.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={isPending || !selected[t.id]}
-                          onClick={() => runManual(t.id)}
-                          className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
-                        >
-                          Confirm
-                        </button>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={selected[t.id] ?? ""}
+                            onChange={(e) =>
+                              setSelected((prev) => ({ ...prev, [t.id]: e.target.value }))
+                            }
+                            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                          >
+                            <option value="">Match to payment…</option>
+                            {rowCandidates.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={isPending || !selected[t.id]}
+                            onClick={() => runManual(t.id)}
+                            className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                          >
+                            Confirm
+                          </button>
+                        </div>
+                        {direction === "OUT" && openInvoices.length > 0 && (
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={selectedInvoice[t.id] ?? ""}
+                              onChange={(e) =>
+                                setSelectedInvoice((prev) => ({ ...prev, [t.id]: e.target.value }))
+                              }
+                              className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+                            >
+                              <option value="">Or settle an open invoice…</option>
+                              {openInvoices.map((inv) => (
+                                <option key={inv.id} value={inv.id}>
+                                  {inv.label}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={isPending || !selectedInvoice[t.id]}
+                              onClick={() => runSettle(t.id)}
+                              className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
+                            >
+                              Settle
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                     {rowError[t.id] && (

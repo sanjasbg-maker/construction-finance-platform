@@ -8,6 +8,12 @@ export type ReconcileResult = { success: true } | { success: false; error: strin
 export type AutoReconcileResult =
   | { success: true; matched: number }
   | { success: false; error: string };
+export type SettleResult =
+  | { success: true; paymentId: string }
+  | { success: false; error: string };
+
+// Same eligibility set Treasury's allocation-actions.ts uses for "open for payment".
+const OPEN_PURCHASE_STATUSES = new Set(["READY_FOR_PAYMENT", "PARTIALLY_PAID"]);
 
 async function linkTransactionToPayment(userId: string, transactionId: string, paymentId: string) {
   const client = withUser(userId);
@@ -84,4 +90,97 @@ export async function autoReconcileStatement(statementId: string): Promise<AutoR
   revalidatePath(`/bank-statements/${statementId}`);
   revalidatePath("/treasury");
   return { success: true, matched };
+}
+
+/**
+ * Closes an open Purchase Invoice (typically received via SEF) directly from
+ * an unreconciled bank transaction, instead of requiring a Payment to be
+ * created in Treasury first. Creates the Payment pre-linked to the
+ * transaction (bankTransactionId set immediately, no separate reconcile
+ * step), allocates as much of the transaction as the invoice needs, and
+ * updates the invoice's status - same allocation/status logic as Treasury's
+ * addAllocation, just triggered from the bank statement side.
+ *
+ * If the transaction is larger than this one invoice's remaining balance
+ * (one payment settling multiple invoices), the leftover stays unallocated
+ * on the new Payment - visible and allocatable from its Treasury detail page
+ * via the existing AllocationForm, same as any other payment.
+ */
+export async function settleInvoiceFromTransaction(
+  transactionId: string,
+  purchaseInvoiceId: string,
+): Promise<SettleResult> {
+  const { user, error } = await requireWriteAccess();
+  if (error || !user) return { success: false, error: error ?? "Unauthorized" };
+
+  const transaction = await prisma.bankTransaction.findUnique({
+    where: { id: transactionId },
+    include: { bankStatement: { include: { bankAccount: true } } },
+  });
+  if (!transaction) return { success: false, error: "Transaction not found." };
+  if (transaction.reconciled) {
+    return { success: false, error: "Transaction is already reconciled." };
+  }
+
+  const rawAmount = Number(transaction.amount);
+  if (rawAmount >= 0) {
+    return { success: false, error: "This transaction is money coming in, not a vendor payment." };
+  }
+
+  const invoice = await prisma.purchaseInvoice.findUnique({
+    where: { id: purchaseInvoiceId },
+    include: { allocations: true },
+  });
+  if (!invoice) return { success: false, error: "Invoice not found." };
+  if (!OPEN_PURCHASE_STATUSES.has(invoice.status)) {
+    return { success: false, error: `Invoice is not open for payment (status: ${invoice.status}).` };
+  }
+
+  const bankAccount = transaction.bankStatement.bankAccount;
+  if (invoice.currency !== bankAccount.currency) {
+    return { success: false, error: "Invoice currency does not match the bank account's currency." };
+  }
+
+  const transactionAmount = Math.abs(rawAmount);
+  const allocatedSoFar = invoice.allocations.reduce((acc, a) => acc + Number(a.amount), 0);
+  const invoiceRemaining = Number(invoice.amount) - allocatedSoFar;
+  if (invoiceRemaining <= 0.001) {
+    return { success: false, error: "This invoice has no remaining balance." };
+  }
+  const allocationAmount = Math.min(transactionAmount, invoiceRemaining);
+  const nextStatus =
+    allocatedSoFar + allocationAmount >= Number(invoice.amount) - 0.001 ? "PAID" : "PARTIALLY_PAID";
+
+  const client = withUser(user.id);
+  const payment = await client.$transaction(async (tx) => {
+    const created = await tx.payment.create({
+      data: {
+        direction: "OUT",
+        type: "INVOICE_SETTLEMENT",
+        amount: transactionAmount.toFixed(2),
+        currency: bankAccount.currency,
+        date: transaction.date,
+        bankAccountId: bankAccount.id,
+        vendorId: invoice.vendorId,
+        bankTransactionId: transaction.id,
+      },
+    });
+    await tx.paymentAllocation.create({
+      data: {
+        paymentId: created.id,
+        purchaseInvoiceId: invoice.id,
+        amount: allocationAmount.toFixed(2),
+      },
+    });
+    await tx.purchaseInvoice.update({ where: { id: invoice.id }, data: { status: nextStatus } });
+    await tx.bankTransaction.update({ where: { id: transaction.id }, data: { reconciled: true } });
+    return created;
+  });
+
+  revalidatePath("/bank-statements");
+  revalidatePath(`/bank-statements/${transaction.bankStatementId}`);
+  revalidatePath("/purchase-invoices");
+  revalidatePath(`/purchase-invoices/${invoice.id}`);
+  revalidatePath("/treasury");
+  return { success: true, paymentId: payment.id };
 }

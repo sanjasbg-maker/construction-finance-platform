@@ -27,8 +27,16 @@ const OUTSTANDING_SALES_STATUSES = ["SENT", "PARTIALLY_PAID", "OVERDUE"] as cons
 export default async function ReportsPage() {
   const now = new Date();
 
-  const [purchaseInvoices, salesInvoices, bankAccounts, projects, retentions, advancePayments] =
-    await Promise.all([
+  const [
+    purchaseInvoices,
+    salesInvoices,
+    bankAccounts,
+    projects,
+    retentions,
+    advancePayments,
+    vendorsWithOpeningBalance,
+    clientsWithOpeningBalance,
+  ] = await Promise.all([
       prisma.purchaseInvoice.findMany({
         where: { status: { in: [...OUTSTANDING_PURCHASE_STATUSES] } },
         include: { vendor: true, project: true, allocations: true },
@@ -52,6 +60,8 @@ export default async function ReportsPage() {
         where: { type: { in: ["VENDOR_ADVANCE", "CLIENT_ADVANCE"] } },
         include: { allocations: true },
       }),
+      prisma.vendor.findMany({ where: { openingBalance: { not: 0 } }, orderBy: { name: "asc" } }),
+      prisma.client.findMany({ where: { openingBalance: { not: 0 } }, orderBy: { name: "asc" } }),
     ]);
 
   const payablesRows = purchaseInvoices.map((inv) => ({
@@ -76,10 +86,23 @@ export default async function ReportsPage() {
     overdue: inv.dueDate < now,
   }));
 
+  // Lump sums carried over from a previous accounting system, not tied to a
+  // specific invoice - included in the Outstanding totals but shown as their
+  // own list rather than mixed into the per-invoice tables above (they have
+  // no invoice number or due date).
+  const vendorOpeningBalanceRows = vendorsWithOpeningBalance.map((v) => ({
+    amount: Number(v.openingBalance),
+    currency: v.openingBalanceCurrency,
+  }));
+  const clientOpeningBalanceRows = clientsWithOpeningBalance.map((c) => ({
+    amount: Number(c.openingBalance),
+    currency: c.openingBalanceCurrency,
+  }));
+
   const cashRows = bankAccounts.map((account) => {
     const net = account.payments.reduce(
       (acc, p) => acc + (p.direction === "IN" ? Number(p.amount) : -Number(p.amount)),
-      0,
+      Number(account.openingBalance),
     );
     return { id: account.id, name: account.name, currency: account.currency, net };
   });
@@ -206,12 +229,33 @@ export default async function ReportsPage() {
             Outstanding Payables
           </h2>
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            Total: {formatMultiCurrency(payablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })))}
+            Total:{" "}
+            {formatMultiCurrency([
+              ...payablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })),
+              ...vendorOpeningBalanceRows,
+            ])}
           </span>
         </div>
-        {payablesRows.length === 0 ? (
+        {vendorsWithOpeningBalance.length > 0 && (
+          <div className="rounded-lg border border-dashed border-zinc-300 p-3 text-sm dark:border-zinc-700">
+            <p className="mb-2 font-medium text-zinc-700 dark:text-zinc-300">
+              Opening balances carried over
+            </p>
+            <ul className="flex flex-col gap-1">
+              {vendorsWithOpeningBalance.map((v) => (
+                <li key={v.id} className="flex justify-between text-zinc-600 dark:text-zinc-400">
+                  <Link href={`/vendors/${v.id}/edit`} className="hover:underline">
+                    {v.name}
+                  </Link>
+                  <span>{formatMoney(v.openingBalance, v.openingBalanceCurrency)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {payablesRows.length === 0 && vendorsWithOpeningBalance.length === 0 ? (
           <EmptyRow />
-        ) : (
+        ) : payablesRows.length === 0 ? null : (
           <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full text-left text-sm">
               <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
@@ -254,12 +298,33 @@ export default async function ReportsPage() {
             Outstanding Receivables
           </h2>
           <span className="text-sm text-zinc-500 dark:text-zinc-400">
-            Total: {formatMultiCurrency(receivablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })))}
+            Total:{" "}
+            {formatMultiCurrency([
+              ...receivablesRows.map((r) => ({ amount: r.remaining, currency: r.currency })),
+              ...clientOpeningBalanceRows,
+            ])}
           </span>
         </div>
-        {receivablesRows.length === 0 ? (
+        {clientsWithOpeningBalance.length > 0 && (
+          <div className="rounded-lg border border-dashed border-zinc-300 p-3 text-sm dark:border-zinc-700">
+            <p className="mb-2 font-medium text-zinc-700 dark:text-zinc-300">
+              Opening balances carried over
+            </p>
+            <ul className="flex flex-col gap-1">
+              {clientsWithOpeningBalance.map((c) => (
+                <li key={c.id} className="flex justify-between text-zinc-600 dark:text-zinc-400">
+                  <Link href={`/clients/${c.id}/edit`} className="hover:underline">
+                    {c.name}
+                  </Link>
+                  <span>{formatMoney(c.openingBalance, c.openingBalanceCurrency)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {receivablesRows.length === 0 && clientsWithOpeningBalance.length === 0 ? (
           <EmptyRow />
-        ) : (
+        ) : receivablesRows.length === 0 ? null : (
           <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
             <table className="w-full text-left text-sm">
               <thead className="bg-zinc-50 text-xs uppercase text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400">
@@ -367,8 +432,8 @@ export default async function ReportsPage() {
           Cash Position by Bank Account
         </h2>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          Net of all recorded Treasury payments (incoming minus outgoing). Not a true bank
-          balance — this app doesn&apos;t track opening balances.
+          Opening balance (set per account under Bank Accounts) plus the net of all recorded
+          Treasury payments (incoming minus outgoing).
         </p>
         {cashRows.length === 0 ? (
           <EmptyRow />

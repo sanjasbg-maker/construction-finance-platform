@@ -20,7 +20,10 @@ export default async function EditClientPage({
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Edit Client
       </h1>
-      <ClientForm action={updateClient.bind(null, id)} defaultValues={client} />
+      <ClientForm
+        action={updateClient.bind(null, id)}
+        defaultValues={{ ...client, openingBalance: client.openingBalance.toString() }}
+      />
     </div>
   );
 }

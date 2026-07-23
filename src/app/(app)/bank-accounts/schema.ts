@@ -6,6 +6,12 @@ export const bankAccountSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200),
   iban: z.string().trim().max(50).optional().or(z.literal("")),
   currency: z.enum(currencies),
+  openingBalance: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .refine((v) => !v || !Number.isNaN(Number(v)), "Opening balance must be a number"),
 });
 
 export type BankAccountInput = z.infer<typeof bankAccountSchema>;
@@ -16,5 +22,6 @@ export function toBankAccountData(input: BankAccountInput) {
     name: input.name,
     iban: input.iban || null,
     currency: input.currency,
+    openingBalance: input.openingBalance || "0",
   };
 }

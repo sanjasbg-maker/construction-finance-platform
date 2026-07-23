@@ -20,7 +20,10 @@ export default async function EditVendorPage({
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Edit Vendor
       </h1>
-      <VendorForm action={updateVendor.bind(null, id)} defaultValues={vendor} />
+      <VendorForm
+        action={updateVendor.bind(null, id)}
+        defaultValues={{ ...vendor, openingBalance: vendor.openingBalance.toString() }}
+      />
     </div>
   );
 }

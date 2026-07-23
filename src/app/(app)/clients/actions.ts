@@ -29,6 +29,8 @@ function parseFormData(formData: FormData) {
     taxId: String(formData.get("taxId") ?? ""),
     email: String(formData.get("email") ?? ""),
     phone: String(formData.get("phone") ?? ""),
+    openingBalance: String(formData.get("openingBalance") ?? ""),
+    openingBalanceCurrency: String(formData.get("openingBalanceCurrency") ?? "EUR"),
   };
 }
 

@@ -30,6 +30,8 @@ function parseFormData(formData: FormData) {
     email: String(formData.get("email") ?? ""),
     phone: String(formData.get("phone") ?? ""),
     paymentTerms: String(formData.get("paymentTerms") ?? ""),
+    openingBalance: String(formData.get("openingBalance") ?? ""),
+    openingBalanceCurrency: String(formData.get("openingBalanceCurrency") ?? "EUR"),
   };
 }
 

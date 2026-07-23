@@ -37,6 +37,15 @@ export default async function BankStatementDetailPage({
     orderBy: { date: "desc" },
   });
 
+  const openInvoices = await prisma.purchaseInvoice.findMany({
+    where: {
+      status: { in: ["READY_FOR_PAYMENT", "PARTIALLY_PAID"] },
+      currency: statement.bankAccount.currency,
+    },
+    include: { vendor: true, allocations: true },
+    orderBy: { dueDate: "asc" },
+  });
+
   const reconciledCount = statement.transactions.filter((t) => t.reconciled).length;
 
   const transactionRows = statement.transactions.map((t) => ({
@@ -56,6 +65,14 @@ export default async function BankStatementDetailPage({
     direction: p.direction as "IN" | "OUT",
     label: `${p.vendor?.name ?? p.client?.name ?? p.type} — ${formatMoney(p.amount)} ${p.currency} (${p.date.toISOString().slice(0, 10)})`,
   }));
+
+  const openInvoiceOptions = openInvoices.map((inv) => {
+    const remaining = Number(inv.amount) - inv.allocations.reduce((a, x) => a + Number(x.amount), 0);
+    return {
+      id: inv.id,
+      label: `${inv.number} — ${inv.vendor.name} (${formatMoney(remaining)} ${inv.currency} remaining)`,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -82,6 +99,7 @@ export default async function BankStatementDetailPage({
         statementId={statement.id}
         transactions={transactionRows}
         candidatePayments={candidatePayments}
+        openInvoices={openInvoiceOptions}
       />
     </div>
   );

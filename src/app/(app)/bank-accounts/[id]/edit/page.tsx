@@ -20,7 +20,10 @@ export default async function EditBankAccountPage({
       <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
         Edit Bank Account
       </h1>
-      <BankAccountForm action={updateBankAccount.bind(null, id)} defaultValues={account} />
+      <BankAccountForm
+        action={updateBankAccount.bind(null, id)}
+        defaultValues={{ ...account, openingBalance: account.openingBalance.toString() }}
+      />
     </div>
   );
 }
